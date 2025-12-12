@@ -1,86 +1,100 @@
-# # oral_cancer_minimal_with_plot.py
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from sklearn.linear_model import LogisticRegression
-# from sklearn.model_selection import train_test_split
-# from sklearn.metrics import accuracy_score, roc_auc_score
-
-# # Load CSV (all numeric, last column = label 0/1)
-# data = np.loadtxt("oral_cancer.csv", delimiter=",")
-# X, y = data[:, :-1], data[:, -1].astype(int)
-
-# # Train-test split
-# Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-# # Train model
-# clf = LogisticRegression(max_iter=1000, class_weight="balanced").fit(Xtr, ytr)
-
-# # Predictions
-# proba = clf.predict_proba(Xte)[:, 1]
-# pred = (proba >= 0.5).astype(int)
-
-# print("Accuracy:", round(accuracy_score(yte, pred), 4))
-# print("ROC AUC:", round(roc_auc_score(yte, proba), 4))
-
-# # ----- Plot -----
-# plt.figure(figsize=(8,4))
-# plt.scatter(range(len(proba)), proba, c=yte, cmap='coolwarm', s=50)
-# plt.axhline(0.5, color='black', linestyle='--', label='Decision Boundary (0.5)')
-# plt.title("Oral Cancer Prediction (Probability Plot)")
-# plt.xlabel("Sample Index")
-# plt.ylabel("Predicted Cancer Probability")
-# plt.colorbar(label="True Label (0 = Healthy, 1 = Cancer)")
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-import numpy as np
+import csv
 import matplotlib.pyplot as plt
 
-def load_csv_safely(path):
-    # Load using genfromtxt (handles headers + text)
-    raw = np.genfromtxt(path, delimiter=",", dtype=str)
+filename = "oral_cancer_prediction_dataset.csv"
 
-    # Remove header
-    data = raw[1:]
+# --- Step 1: Load dataset ---
+with open(filename, encoding='utf-8') as f:
+    reader = csv.DictReader(f)
+    data = list(reader)
+    columns = reader.fieldnames
 
-    # Convert everything except non-numeric columns
-    numeric_data = []
-    for col in data.T:  # iterate column-wise
+print("Columns found in dataset:")
+print(columns)
+print("-" * 60)
+
+# --- Step 2: Identify numeric + label columns ---
+numeric_columns = []
+label_col = None
+
+for col in columns:
+    numeric_count = 0
+    for row in data[:30]:
+        val = row.get(col, "").strip()
         try:
-            numeric_data.append(col.astype(float))
-        except ValueError:
-            # Column is non-numeric → skip it (ID or text)
+            float(val)
+            numeric_count += 1
+        except:
+            pass
+    if numeric_count > 10:
+        numeric_columns.append(col)
+    if any(x in col.lower() for x in ["cancer", "target", "label", "result", "diagnosis", "status"]):
+        label_col = col
+
+if not label_col:
+    label_col = columns[-1]
+
+print("Numeric columns:", numeric_columns)
+print("Label column:", label_col)
+print("-" * 60)
+
+# --- Step 3: Extract clean data ---
+features, labels = [], []
+
+for row in data:
+    vals = []
+    for col in numeric_columns:
+        val = row.get(col, "").strip()
+        try:
+            vals.append(float(val))
+        except:
             continue
+    if not vals:
+        continue
+    val_l = row.get(label_col, "").strip()
+    if not val_l:
+        continue
+    l = 1 if val_l.lower() in ["1", "yes", "true", "positive", "cancer", "malignant"] else 0
+    features.append(sum(vals)/len(vals))
+    labels.append(l)
 
-    numeric_data = np.array(numeric_data).T  # transpose back to rows
-    return numeric_data
+if not features:
+    print(" No numeric data found.")
+    exit()
 
-# ---------------- MAIN SCRIPT ----------------
+# --- Step 4: Fast optimized thresholding ---
+features, labels = zip(*sorted(zip(features, labels)))
+n = len(features)
 
-def main():
-    # Load dataset safely
-    data = load_csv_safely("oral_cancer_prediction_dataset.csv")
+# Try 5 smart thresholds (20%, 40%, 50%, 60%, 80%)
+percentiles = [0.2, 0.4, 0.5, 0.6, 0.8]
+best_acc, best_threshold = 0, None
 
-    # Last column = label
-    X = data[:, :-1]
-    y = data[:, -1].astype(int)
+for p in percentiles:
+    idx = int(p * n)
+    threshold = features[idx]
+    correct = sum(1 for i in range(n) if (features[i] > threshold) == (labels[i] == 1))
+    acc = correct / n
+    if acc > best_acc:
+        best_acc, best_threshold = acc, threshold
 
-    # Basic rule-based prediction (no ML)
-    threshold = X[:, 0].mean()
-    y_pred = (X[:, 0] > threshold).astype(int)
+print(f" Best Threshold: {round(best_threshold, 2)}")
+print(f" Accuracy (fast rule-based): {round(best_acc * 100, 2)}%")
+print("-" * 60)
 
-    # Accuracy
-    acc = (y_pred == y).mean()
-    print("Accuracy:", round(acc, 4))
+# --- Step 5: Visualization ---
+plt.hist(features, bins=10, color="skyblue", edgecolor="black")
+plt.axvline(best_threshold, color='red', linestyle='--', label='Best Threshold')
+plt.title("Feature Distribution with Decision Threshold")
+plt.xlabel("Feature (avg. value)")
+plt.ylabel("Count")
+plt.legend()
+plt.show()
 
-    # Simple graph
-    plt.scatter(range(len(y_pred)), y_pred, c=y, cmap='coolwarm')
-    plt.axhline(0.5, color='black', linestyle='--')
-    plt.title("Oral Cancer Prediction (Rule-Based)")
-    plt.xlabel("Sample Index")
-    plt.ylabel("Predicted Label")
-    plt.show()
-
-if __name__ == "__main__":
-    main()
+plt.scatter(features, labels, c=["red" if l == 1 else "green" for l in labels])
+plt.axvline(best_threshold, color='blue', linestyle='dotted', label='Decision Line')
+plt.title("Feature vs Cancer Presence")
+plt.xlabel("Feature (average value)")
+plt.ylabel("Cancer (1=Yes, 0=No)")
+plt.legend()
+plt.show()
